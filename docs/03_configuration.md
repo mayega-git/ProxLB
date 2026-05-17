@@ -174,6 +174,26 @@ The `disk_ignore_mode` controls which disk value is compared against the thresho
 
 The filter applies to both VMs and CTs and is run before group construction so affinity and anti-affinity groups are computed on the migration-eligible set only. Guests already ignored (for example via the `plb_ignore` tag) are left untouched.
 
+> [!IMPORTANT]
+> **Caveats of the `used` mode**
+>
+> The `used` value is reported by the Proxmox API (`disk` field) and behaves differently depending on the guest type:
+>
+> * **CTs (LXC)**: Proxmox has direct access to the container filesystem, so `disk.used` reflects the real consumption.
+> * **VMs (QEMU)**: Proxmox has no visibility into the guest filesystem unless the `qemu-guest-agent` is installed and enabled inside the VM. Without the agent, `disk.used` is typically reported as `0`, which means the threshold will never be crossed and the VM will not be filtered.
+>
+> If you run VMs without `qemu-guest-agent`, prefer `disk_ignore_mode: assigned`.
+
+> [!NOTE]
+> **Comparison is strict (`>`)**
+>
+> A guest whose disk value equals the threshold exactly is not filtered. Only values strictly greater than the threshold trigger the ignore.
+
+> [!NOTE]
+> **Shared vs local storage**
+>
+> The filter does not differentiate between guests on shared storage (Ceph, NFS) and guests on local storage. On shared storage, a Proxmox live migration does not actually move disk data and is cheap regardless of disk size, so the disk-ignore filter may be overly conservative in this case. The filter is most useful when guests live on local storage (`balancing.with_local_disks: True`).
+
 ### Pin VMs to Specific Hypervisor Nodes
 <img align="left" src="https://cdn.gyptazy.com/images/proxlb-tag-node-pinning.jpg"/> Guests, such as VMs or CTs, can also be pinned to specific nodes in the cluster. This might be usefull when running applications with some special licensing requirements that are only fulfilled on certain nodes. It might also be interesting, when some physical hardware is attached to a node, that is not available in general within the cluster.
 
