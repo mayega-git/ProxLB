@@ -16,7 +16,7 @@ try:
 except ImportError:
     PYYAML_PRESENT = False
 from enum import StrEnum
-from typing import Optional, assert_never
+from typing import Literal, Optional, assert_never
 from pydantic import BaseModel, Field, ValidationError
 from pathlib import Path
 from proxlb.utils.logger import SystemdLogger
@@ -90,6 +90,9 @@ class Config(BaseModel):
         balance_types: list["Config.GuestType"] = []
         balanciness: int = 10
         cpu_threshold: Optional[int] = None
+        disk_ignore_enable: bool = False
+        disk_ignore_threshold: Optional[int] = None
+        disk_ignore_mode: Literal["assigned", "used"] = "assigned"
         enable: bool = False
         enforce_affinity: bool = False
         enforce_pinning: bool = False

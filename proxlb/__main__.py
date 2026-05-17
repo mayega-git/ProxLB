@@ -28,6 +28,7 @@ from proxlb.models.guests import Guests
 from proxlb.models.groups import Groups
 from proxlb.models.calculations import Calculations
 from proxlb.models.balancing import Balancing
+from proxlb.models.disk_ignore_filter import DiskIgnoreFilter
 from proxlb.models.pools import Pools
 from proxlb.models.ha_rules import HaRules
 from proxlb.utils.helper import Helper
@@ -95,6 +96,19 @@ while True:
     pools = Pools.get_pools(proxmox_api)
     ha_rules = HaRules.get_ha_rules(proxmox_api, meta)
     guests = Guests.get_guests(proxmox_api, pools, ha_rules, nodes, proxlb_config)
+
+    # Exclude guests whose disk footprint exceeds the configured threshold
+    # from balancing. Runs before group construction so affinity and
+    # anti-affinity groups are computed on the migration-eligible set only.
+    _disk_ignored = DiskIgnoreFilter.apply(guests, proxlb_config.balancing)
+    if _disk_ignored:
+        _disk_ignored_ids = [vmid for vmid, _ in _disk_ignored]
+        logger.info(
+            f"Disk-ignored guest IDs (above "
+            f"{proxlb_config.balancing.disk_ignore_threshold} GB, mode="
+            f"{proxlb_config.balancing.disk_ignore_mode}): {_disk_ignored_ids}"
+        )
+
     groups = Groups.get_groups(guests, nodes)
 
     # Merge obtained objects from the Proxmox cluster for further usage

@@ -1,0 +1,6 @@
+added:
+- Disk-size based ignore filter. Guests whose assigned or used disk
+  footprint exceeds a configurable threshold (in GB) are automatically
+  excluded from balancing migrations. Opt-in via the new
+  `disk_ignore_enable`, `disk_ignore_threshold` and `disk_ignore_mode`
+  keys in the `balancing` section. Applies to both VMs and CTs.

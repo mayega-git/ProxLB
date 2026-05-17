@@ -11,7 +11,8 @@
         2. [Anti-Affinity Rules](#anti-affinity-rules)
         3. [Affinity / Anti-Affinity Enforcing](#affinity--anti-affinity-enforcing)
         4. [Ignore VMs](#ignore-vms)
-        5. [Pin VMs to Hypervisor Nodes](#pin-vms-to-hypervisor-nodes)
+        5. [Ignore VMs / CTs by Disk Size](#ignore-vms--cts-by-disk-size)
+        6. [Pin VMs to Hypervisor Nodes](#pin-vms-to-hypervisor-nodes)
     2. [API Loadbalancing](#api-loadbalancing)
     3. [Ignore Host-Nodes or Guests](#ignore-host-nodes-or-guests)
     4. [IPv6 Support](#ipv6-support)
@@ -153,6 +154,25 @@ plb_ignore_dev
 As a result, ProxLB will not migrate this guest with the `plb_ignore_dev` tag to any other node.
 
 **Note:** Ignored guests are really ignored. Even by enforcing affinity rules this guest will be ignored.
+
+### Ignore VMs / CTs by Disk Size
+Migrating guests with very large disks across the cluster can take a long time and put significant load on the network. To avoid this, ProxLB can automatically exclude guests whose disk footprint exceeds a configured threshold. Excluded guests are still inspected for resource accounting (so the host node is not considered to have free capacity) but they are not selected for migration.
+
+The filter is opt-in and is configured under the `balancing` section:
+
+```
+balancing:
+  disk_ignore_enable: True       # Activate the filter
+  disk_ignore_threshold: 500     # Threshold expressed in GB (1 GB = 1024^3 bytes)
+  disk_ignore_mode: assigned     # 'assigned' (maxdisk) | 'used' (current consumption)
+```
+
+The `disk_ignore_mode` controls which disk value is compared against the threshold:
+
+* `assigned`: uses the disk size provisioned to the guest (Proxmox `maxdisk`). Stable across cycles and recommended for predictable behaviour.
+* `used`: uses the live consumption (Proxmox `disk`). Useful when guests are thinly provisioned and you want to react to actual data growth.
+
+The filter applies to both VMs and CTs and is run before group construction so affinity and anti-affinity groups are computed on the migration-eligible set only. Guests already ignored (for example via the `plb_ignore` tag) are left untouched.
 
 ### Pin VMs to Specific Hypervisor Nodes
 <img align="left" src="https://cdn.gyptazy.com/images/proxlb-tag-node-pinning.jpg"/> Guests, such as VMs or CTs, can also be pinned to specific nodes in the cluster. This might be usefull when running applications with some special licensing requirements that are only fulfilled on certain nodes. It might also be interesting, when some physical hardware is attached to a node, that is not available in general within the cluster.
