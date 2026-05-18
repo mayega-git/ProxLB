@@ -91,7 +91,7 @@ class Config(BaseModel):
         balanciness: int = 10
         cpu_threshold: Optional[int] = None
         disk_ignore_enable: bool = False
-        disk_ignore_threshold: Optional[int] = None
+        disk_ignore_threshold: Optional[int] = Field(default=None, gt=0)
         disk_ignore_mode: Literal["assigned", "used"] = "assigned"
         enable: bool = False
         enforce_affinity: bool = False

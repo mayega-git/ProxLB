@@ -18,6 +18,8 @@ from proxlb.utils.proxlb_data import ProxLbData
 logger = SystemdLogger()
 
 _BYTES_PER_GB = 1024 ** 3
+SKIP_TAG_PREFIX = "plb_disk_ignore_skip"
+IGNORE_REASON = "disk_filter"
 
 
 class DiskIgnoreFilter:
@@ -28,7 +30,9 @@ class DiskIgnoreFilter:
     compared against either the assigned (``maxdisk``) or used (``disk``)
     value of each guest, depending on ``balancing.disk_ignore_mode``.
     Guests that are already ignored (e.g. via the ``plb_ignore`` tag) are
-    left untouched.
+    left untouched. A guest carrying the ``plb_disk_ignore_skip`` tag is
+    explicitly opted out of this filter and remains eligible for balancing
+    regardless of its disk size.
     """
 
     @staticmethod
@@ -70,9 +74,16 @@ class DiskIgnoreFilter:
         for guest_name, guest in guests.items():
             if guest.ignore:
                 continue
+            if any(tag.startswith(SKIP_TAG_PREFIX) for tag in guest.tags):
+                logger.debug(
+                    f"DiskIgnoreFilter: guest {guest_name} carries an "
+                    f"opt-out tag ({SKIP_TAG_PREFIX}), skipping filter."
+                )
+                continue
             value = guest.disk.used if mode == "used" else guest.disk.total
             if value > threshold_bytes:
                 guest.ignore = True
+                guest.ignore_reason = IGNORE_REASON
                 ignored.append((guest.id, guest_name))
                 logger.debug(
                     f"DiskIgnoreFilter: guest {guest_name} (id={guest.id}) "

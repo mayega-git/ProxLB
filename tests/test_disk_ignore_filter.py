@@ -30,6 +30,7 @@ def _make_guest(
     guest_id: int = 100,
     ignore: bool = False,
     node_current: str = "node1",
+    tags: list[str] | None = None,
 ) -> ProxLbData.Guest:
     disk = ProxLbData.Guest.Metric(
         total=int(disk_total_gb * GB),
@@ -59,12 +60,13 @@ def _make_guest(
         node_target=node_current,
         processed=False,
         pressure_hot=False,
-        tags=[],
+        tags=tags or [],
         pools=[],
         ha_rules=[],
         affinity_groups=[name],
         anti_affinity_groups=[],
         ignore=ignore,
+        ignore_reason="tag" if ignore else None,
         node_relationships=[],
         node_relationships_strict=False,
         type=Config.GuestType.Vm,
@@ -117,6 +119,7 @@ def test_above_threshold_assigned_flags_guest() -> None:
 
     assert result == [(100, "vm1")]
     assert guests["vm1"].ignore is True
+    assert guests["vm1"].ignore_reason == "disk_filter"
 
 
 def test_above_threshold_used_flags_guest() -> None:
@@ -128,6 +131,7 @@ def test_above_threshold_used_flags_guest() -> None:
 
     assert result == [(100, "vm1")]
     assert guests["vm1"].ignore is True
+    assert guests["vm1"].ignore_reason == "disk_filter"
 
 
 def test_assigned_mode_ignores_used_value() -> None:
@@ -175,8 +179,46 @@ def test_already_ignored_guest_skipped() -> None:
 
     # Already-ignored guests are not reported as newly flagged
     assert result == []
-    # State remains ignored
+    # State remains ignored, and the previous reason ("tag") is preserved
     assert guests["vm1"].ignore is True
+    assert guests["vm1"].ignore_reason == "tag"
+
+
+def test_skip_tag_opts_out_large_guest() -> None:
+    """A guest carrying the plb_disk_ignore_skip tag must not be filtered."""
+    guests = {
+        "huge_critical_vm": _make_guest(
+            "huge_critical_vm",
+            disk_total_gb=2000,
+            disk_used_gb=10,
+            tags=["plb_disk_ignore_skip"],
+        ),
+    }
+    balancing = _make_balancing(threshold=500)
+
+    result = DiskIgnoreFilter.apply(guests, balancing)
+
+    assert result == []
+    assert guests["huge_critical_vm"].ignore is False
+    assert guests["huge_critical_vm"].ignore_reason is None
+
+
+def test_skip_tag_with_suffix_also_opts_out() -> None:
+    """plb_disk_ignore_skip_$reason variants must also opt out (prefix match)."""
+    guests = {
+        "vm1": _make_guest(
+            "vm1",
+            disk_total_gb=2000,
+            disk_used_gb=10,
+            tags=["plb_disk_ignore_skip_compliance"],
+        ),
+    }
+    balancing = _make_balancing(threshold=500)
+
+    result = DiskIgnoreFilter.apply(guests, balancing)
+
+    assert result == []
+    assert guests["vm1"].ignore is False
 
 
 def test_mixed_guests_partial_flagging() -> None:
@@ -285,3 +327,21 @@ def test_integration_relocate_skips_ignored_guests() -> None:
 
     # vm1 was ignored → node_target must stay equal to node_current
     assert proxlb_data.guests["vm1"].node_target == "node1"
+
+
+def test_pydantic_rejects_non_positive_threshold() -> None:
+    """A non-positive disk_ignore_threshold must be rejected by Pydantic."""
+    import pytest
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        Config.Balancing(disk_ignore_enable=True, disk_ignore_threshold=0)
+
+    with pytest.raises(ValidationError):
+        Config.Balancing(disk_ignore_enable=True, disk_ignore_threshold=-1)
+
+
+def test_pydantic_accepts_positive_threshold() -> None:
+    """A strictly positive disk_ignore_threshold must be accepted."""
+    cfg = Config.Balancing(disk_ignore_enable=True, disk_ignore_threshold=1)
+    assert cfg.disk_ignore_threshold == 1

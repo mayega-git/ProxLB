@@ -78,6 +78,7 @@ class ProxLbData(BaseModel):
         affinity_groups: list[str]
         anti_affinity_groups: list[str]
         ignore: bool
+        ignore_reason: Optional[str] = None
         node_relationships: list[str]
         node_relationships_strict: bool
         type: GuestType

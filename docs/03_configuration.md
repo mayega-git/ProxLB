@@ -174,6 +174,20 @@ The `disk_ignore_mode` controls which disk value is compared against the thresho
 
 The filter applies to both VMs and CTs and is run before group construction so affinity and anti-affinity groups are computed on the migration-eligible set only. Guests already ignored (for example via the `plb_ignore` tag) are left untouched.
 
+When a guest is flagged by this filter, its `ignore_reason` is set to `disk_filter` (vs. `tag` for `plb_ignore`), making it possible to distinguish the two in the JSON output or in custom tooling.
+
+#### Per-guest opt-out: `plb_disk_ignore_skip`
+
+To force-balance a specific large guest even though the disk-ignore filter is enabled globally, assign the tag `plb_disk_ignore_skip` (optionally with a suffix like `plb_disk_ignore_skip_compliance`) to that guest. The filter then leaves it untouched and it stays eligible for migration.
+
+```
+plb_disk_ignore_skip
+```
+
+#### Threshold validation
+
+`disk_ignore_threshold` must be strictly greater than zero. A value of `0` or a negative value is rejected at startup by the configuration schema, which prevents the easy mistake of accidentally ignoring every guest in the cluster.
+
 > [!IMPORTANT]
 > **Caveats of the `used` mode**
 >
