@@ -1,0 +1,136 @@
+name: Publish APT repository to GitHub Pages
+
+on:
+  push:
+    branches: [feat-disk-ignore-filter, claude/feat-disk-ignore-filter]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+
+    env:
+      DEBEMAIL: "ci@credativ.de"
+      DEBFULLNAME: "CI Bot"
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            debhelper dh-python python3-all build-essential \
+            devscripts dpkg-dev apt-utils gnupg
+
+      - name: Configure generic dpkg vendor
+        run: |
+          sudo mkdir -p /etc/dpkg/origins
+          echo "Vendor: deb" | sudo tee /etc/dpkg/origins/deb
+          echo "DEB_VENDOR=deb" >> "$GITHUB_ENV"
+
+      - name: Build .deb package
+        run: |
+          dpkg-buildpackage -us -uc -b
+          mkdir -p site/pool/main
+          mv ../*.deb site/pool/main/
+          echo "PKG_VERSION=$(dpkg-parsechangelog -S Version)" >> "$GITHUB_ENV"
+
+      - name: Import GPG signing key
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+        run: |
+          echo "$GPG_PRIVATE_KEY" | gpg --batch --import
+          GPG_FPR=$(gpg --batch --list-secret-keys --with-colons \
+            | awk -F: '/^fpr:/ {print $10; exit}')
+          if [ -z "$GPG_FPR" ]; then
+            echo "Could not resolve GPG fingerprint from imported key" >&2
+            exit 1
+          fi
+          echo "GPG_FPR=$GPG_FPR" >> "$GITHUB_ENV"
+
+      - name: Build flat APT repository
+        run: |
+          cd site
+          # Packages index
+          apt-ftparchive packages pool/main > Packages
+          gzip -9 -k -f Packages
+          # Release file
+          apt-ftparchive \
+            -o APT::FTPArchive::Release::Origin="ProxLB Custom Repo" \
+            -o APT::FTPArchive::Release::Label="proxlb-custom" \
+            -o APT::FTPArchive::Release::Suite="stable" \
+            -o APT::FTPArchive::Release::Codename="stable" \
+            -o APT::FTPArchive::Release::Architectures="amd64" \
+            -o APT::FTPArchive::Release::Components="main" \
+            release . > Release
+
+      - name: Sign Release
+        run: |
+          cd site
+          gpg --batch --yes --default-key "$GPG_FPR" \
+            -abs -o Release.gpg Release
+          gpg --batch --yes --default-key "$GPG_FPR" \
+            --clearsign -o InRelease Release
+          gpg --armor --export "$GPG_FPR" > public.key
+
+      - name: Generate index page
+        run: |
+          BASE_URL="https://${GITHUB_REPOSITORY_OWNER}.github.io/${GITHUB_REPOSITORY#*/}"
+          cat > site/index.html <<HTML
+          <!DOCTYPE html>
+          <html lang="en">
+          <head>
+            <meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <title>ProxLB APT Repository</title>
+            <style>
+              body { font-family: ui-monospace, monospace; max-width: 860px;
+                     margin: 2rem auto; padding: 0 1.2rem; color: #1a1a1a; }
+              h1   { border-bottom: 2px solid #e1e4e8; padding-bottom: .4rem; }
+              pre  { background: #161b22; color: #e6edf3; padding: 1.2rem;
+                     border-radius: 6px; overflow-x: auto; line-height: 1.5; }
+              .badge { display: inline-block; background: #238636; color: #fff;
+                       border-radius: 4px; padding: .1rem .5rem; font-size: .85rem; }
+            </style>
+          </head>
+          <body>
+            <h1>ProxLB &ndash; Custom APT Repository</h1>
+            <p>Latest version: <span class="badge">${PKG_VERSION}</span></p>
+
+            <h2>Quick install</h2>
+            <pre>sudo install -d /etc/apt/keyrings
+          curl -fsSL ${BASE_URL}/public.key \\
+            | sudo gpg --dearmor -o /etc/apt/keyrings/proxlb-custom.gpg
+
+          echo "deb [signed-by=/etc/apt/keyrings/proxlb-custom.gpg] ${BASE_URL} ./" \\
+            | sudo tee /etc/apt/sources.list.d/proxlb-custom.list
+
+          sudo apt-get update
+          sudo apt-get install -y proxlb</pre>
+          </body>
+          </html>
+          HTML
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - name: Deploy to GitHub Pages
+        id: deploy
+        uses: actions/deploy-pages@v4
